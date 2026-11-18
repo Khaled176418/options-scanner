@@ -1,0 +1,51 @@
+name: الاختبار التاريخي
+
+on:
+  workflow_dispatch:
+    inputs:
+      years:
+        description: "عدد السنوات"
+        default: "2"
+        required: true
+      tickers:
+        description: "أسهم محددة مفصولة بمسافة (اتركه فاضي = السوق كامل)"
+        default: ""
+        required: false
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: تثبيت المكتبات
+        run: pip install -r requirements.txt
+
+      - name: تشغيل الاختبار
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          YEARS: ${{ github.event.inputs.years }}
+          TICKERS: ${{ github.event.inputs.tickers }}
+        run: |
+          if [ -n "$TICKERS" ]; then
+            python backtest.py --years "$YEARS" --tickers $TICKERS
+          else
+            python backtest.py --years "$YEARS"
+          fi
+
+      - name: رفع النتائج
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backtest-results
+          path: |
+            backtest_summary.txt
+            backtest_trades.csv
+          if-no-files-found: ignore
