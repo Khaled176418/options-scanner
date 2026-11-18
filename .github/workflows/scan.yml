@@ -1,0 +1,74 @@
+name: ماسح الأسهم
+
+on:
+  schedule:
+    - cron: "*/15 13-21 * * 1-5"
+  workflow_dispatch: {}
+
+concurrency:
+  group: scanner
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 14
+    steps:
+      - name: هل السوق مفتوح؟
+        id: gate
+        run: |
+          python3 - <<'EOF' >> "$GITHUB_OUTPUT"
+          from datetime import datetime
+          from zoneinfo import ZoneInfo
+          n = datetime.now(ZoneInfo("America/New_York"))
+          o = n.weekday() < 5 and (9, 30) <= (n.hour, n.minute) < (16, 0)
+          print("open=" + ("true" if o else "false"))
+          EOF
+
+      - uses: actions/checkout@v4
+        if: steps.gate.outputs.open == 'true' || github.event_name == 'workflow_dispatch'
+
+      - uses: actions/setup-python@v5
+        if: steps.gate.outputs.open == 'true' || github.event_name == 'workflow_dispatch'
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: تثبيت المكتبات
+        if: steps.gate.outputs.open == 'true' || github.event_name == 'workflow_dispatch'
+        run: pip install -r requirements.txt
+
+      - name: استرجاع التنبيهات المرسلة
+        if: steps.gate.outputs.open == 'true' || github.event_name == 'workflow_dispatch'
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            state.json
+            universe_cache.json
+          key: scanner-state-${{ github.run_id }}
+          restore-keys: scanner-state-
+
+      - name: المسح
+        if: steps.gate.outputs.open == 'true' || github.event_name == 'workflow_dispatch'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python scanner.py --once
+
+      - name: حفظ التنبيهات المرسلة
+        if: always() && (steps.gate.outputs.open == 'true' || github.event_name == 'workflow_dispatch')
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            state.json
+            universe_cache.json
+          key: scanner-state-${{ github.run_id }}
+
+      - name: رفع النتائج
+        if: always() && (steps.gate.outputs.open == 'true' || github.event_name == 'workflow_dispatch')
+        uses: actions/upload-artifact@v4
+        with:
+          name: last-scan
+          path: last_scan.csv
+          retention-days: 3
+          if-no-files-found: ignore
